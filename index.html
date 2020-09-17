@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport"
+          content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <style>
+        video::-webkit-media-controls-fullscreen-button{ display: none !important; }
+
+        /*video默认aduio音量按钮*/
+        video::-webkit-media-controls-mute-button { display: none !important;}
+
+        /*video默认setting按钮*/
+        video::-internal-media-controls-overflow-button{ display: none !important;}
+
+        /*腾讯云点播禁用firefox全屏、设置按钮*/
+        .trump-button[sub-component="fullscreen_btn"],.trump-button[now="fullscreen"]{ display:none!important;}
+        .trump-button[sub-component="setting"]{ display:none !important;}
+
+        /*禁用video的controls（要慎重！不要轻易隐藏掉，会导致点击视频不能播放）*/
+        video::-webkit-media-controls {
+            display:none !important;
+        }
+
+
+    </style>
+    <title>Document</title>
+</head>
+<body>
+<div style="text-align: center">
+    <input type="text" id="name" placeholder="用户名">
+    <button onclick="login()">登录</button>
+    <div>
+        登录信息: <span id="lo"></span>
+    </div>
+    <input type="text"  placeholder="目标id" id="to" onchange="getId()">
+    <div>
+        <button onclick="call()">发起连接</button>
+        <button onclick="full()">全屏</button>
+    </div>
+    <video  id="video1" playsinline autoplay muted onmousedown="getWH()" ></video>
+    <video id="video2" playsinline autoplay muted style="display: none"></video>
+    <!--      <video width="1280px" height="720px"  ref="video" src="../assets/2Screenrecorder-2020-04-25-08-03-58-555.mp4" muted autoplay @mousedown="getWH"></video>-->
+</div>
+<script src="js/adapter.js"></script>
+<script src="js/axios.min.js"></script>
+<script src="//cdn.jsdelivr.net/npm/eruda"></script>
+<script>
+eruda.init();
+</script>
+<script>
+    var video1=document.getElementById('video1');
+    var video2=document.getElementById('video2');
+    var lo=document.getElementById('lo');
+    var name=document.getElementById('name').value;
+    var id;
+    var getId=function () {
+        id=document.getElementById('to').value;
+    }
+    var loginMsg;
+    var Myid;
+    var id=document.getElementById('to').value;
+    var pc;
+    var pc_config={
+        iceServers: [
+            {urls: "stun:stun.voipbuster.com",},
+            ],
+    };
+    var pc_constraints={
+        optional: [
+            {DtlsSrtpKeyAgreement: true}
+            ],
+    };
+
+    //var url='http://10.160.128.202:8888';
+    var url='/rtc';
+    var constraints={
+        audio: true, video: true
+    };
+    var loaclStream;
+    var remoteStream;
+    var isInitiator=false;
+    var sendChannel;
+    var  msg={
+            "type":'action',
+            "actid":0,
+            "wid":'',
+            "LRflag":1,
+            "pointx":980,
+            "pointy":506,
+            "nchar":0
+        };
+    var receiveChannel;
+    var screen_width=0;
+    var  screen_height=0;
+    var  video_width=0;
+    var  video_height=0;
+    var  x=0;
+    var  y=0;
+    var  new_x=0;
+    var  new_y=0;
+
+     var login=function () {
+         console.log(888)
+         axios.get(`${url}/sign_in?${name}`).then(res=>{
+             loginMsg=res.data;
+             lo.innerText=loginMsg;
+             myId=loginMsg.split(',')[1];
+             getWait()
+         })
+     }
+     var getWait=function () {
+         axios.get(`${url}/wait?peer_id=${myId}`).then(res=>{
+             //console.log(res,77777777);
+             if(res.data.type=='answer'){
+                 console.log('answer')
+                 pc.setRemoteDescription(new RTCSessionDescription(res.data))
+             }else if(res.data.candidate){
+                 //console.log(res.data,99999999)
+                 var candidate = new RTCIceCandidate({
+                     candidate: res.data.candidate,
+                     sdpMid:res.data.sdpMid,
+                     sdpMLineIndex:res.data.sdpMLineIndex
+                 });
+                 pc.addIceCandidate(candidate)
+             }else if(res.data.type=='offer'){
+                 pc= new RTCPeerConnection(pc_config,pc_constraints);
+                 console.log(res.data,99999)
+                 const data=res.data;
+                 pc.setRemoteDescription(new RTCSessionDescription(data))
+                 pc.createAnswer().then(answer=>{
+                     const ans=answer
+                     return  pc.setLocalDescription(answer,function () {
+                         axios.post(`${url}/message?peer_id=${myId}&to=${id}`,ans,{
+                             headers: {
+                                 'Content-Type': 'text/plain'
+                             }
+                         }).then(res=>{
+                             console.log(res,88888888)
+                         })
+                     })
+                 })
+             }
+             getWait();
+         })
+     }
+     var call=async function () {
+         pc= new RTCPeerConnection(pc_config,pc_constraints);
+
+         console.log(navigator,9999)
+         await navigator.mediaDevices.getUserMedia(constraints).then(function (stream) {
+             console.log(stream,9999999999)
+             loaclStream=stream;
+             video2.srcObject=stream;
+         })
+         loaclStream.getTracks().forEach(function (track) {
+             pc.addTrack(track,loaclStream)
+         })
+
+         isInitiator=true;
+         pc.onicecandidate = handleIce;
+         this.pc.onaddstream=handleRemote;
+         this.pc.onremovestream=handleRemoteStreamRemoved;
+         if(isInitiator){
+             sendChannel=pc.createDataChannel("Hello",{
+                 reliable: true,
+             })
+
+             sendChannel.onopen=function (event) {
+                 console.log(event,'cevent');
+             };
+             sendChannel.onmessage=handleMessage;
+             sendChannel.onclose=handleMessage;
+             pc.ondatachannel=function (event) {
+                 //console.log(event,999999)
+                 receiveChannel=event.channel;
+                 receiveChannel.onmessage = handleMessage;
+                 receiveChannel.onopen = function (event) {
+                     console.log(event,'cevent');
+                 };;
+                 receiveChannel.onclose = handleMessage;
+             }
+         }else {
+             pc.ondatachannel=function (event) {
+                 receiveChannel=event.channel;
+                 receiveChannel.onmessage = handleMessage;
+                 receiveChannel.onopen = function (event) {
+                     console.log(event,'cevent');
+                 };;
+                 receiveChannel.onclose = handleMessage;
+             }
+         }
+         await pc.createOffer().then(offer=>{
+             console.log(offer,7777777)
+             const off=offer;
+             axios.post(`${url}/message?peer_id=${myId}&to=${id}`,off,{
+                 headers: {
+                     'Content-Type': 'text/plain'
+                 }})
+             pc.setLocalDescription(offer)
+         })
+     }
+     var handleIce=function (event){
+         console.log('handIce')
+         //console.log(event,789)
+         if(event.candidate){
+             let p={
+                 type: "candidate",
+                 label: event.candidate.sdpMLineIndex,
+                 id: event.candidate.sdpMid,
+                 candidate: event.candidate.candidate,
+             }
+             sendOffer(p)
+         }
+     }
+     var sendOffer=function (params) {
+         console.log('sendoffer')
+         axios.post(`${url}/message?peer_id=${myId}&to=${id}`,JSON.parse(JSON.stringify(params)),{
+             headers: {
+                 'Content-Type': 'text/plain'
+             }
+         }).then(res=>{
+             //console.log(res,88888888)
+         })
+     }
+     var handleRemote=function (event) {
+         console.log(event,77777777777777)
+         video1.srcObject=event.stream;
+     }
+     var handleRemoteStreamRemoved=function () {
+
+     }
+     var handleMessage=function (event) {
+         var uint8_msg = new Uint8Array(event.data);
+         // 解码成字符串
+         var decodedString = String.fromCharCode.apply(null, uint8_msg);
+         console.log(decodedString);
+         // parse,转成json数据
+         var data = JSON.parse(decodedString);
+         //console.log(data,'data');
+         msg.wid=data.wid;
+     }
+     var sendData=function () {
+         console.log(this.msg,'sendata')
+         if (isInitiator){
+             msg.LRflag=1;
+             msg.pointx=new_x*1-30;
+             msg.pointy=new_y*1-30;
+             sendChannel.send(str2ab(JSON.stringify(this.msg)))
+         }
+     }
+     var handleReceiveChannelStateChange=function () {
+
+     }
+     var  str2ab=function(str) {
+        var buf = new TextEncoder().encode(str);
+        return buf;
+    }
+    var getWH=function(){
+         var event=window.event;
+        //原始视频流尺寸不能变化
+        console.log(event,689);
+
+        if(event.button==0){
+            msg.LRflag=1
+        }
+        if(event.button==2){
+            msg.LRflag=2
+        }
+        //sdebugger;
+        screen_width=video1.clientWidth;
+        screen_height=video1.clientHeight;
+        video_width=event.target.videoWidth;
+        video_height=event.target.videoHeight;
+        // this.video_width=1400;
+        // this.video_height=720;
+        x=event.offsetX;
+        y=event.offsetY;
+
+        // this.msg.pointx=event.offsetX;
+        // this.msg.pointy=event.offsetY;
+        // if(this.isInitiator){
+        //   this.computedWH();
+        //   this.sendData();
+        // }
+        computedWH();
+        //this.computedH();
+        sendData();
+    }
+    var computedWH=function(){
+        var screen_ratio=screen_width/screen_height;
+        var video_ratio=video_width/video_height;
+        var factor=1;
+        if (screen_ratio == video_ratio) {
+            console.log(1)
+            factor = screen_width / video_width;
+            new_x = parseFloat(x / factor);
+            new_y = parseFloat(y / factor);
+            msg.pointx=new_x;
+            msg.pointy=new_y;
+        }else {
+            if (screen_ratio <video_ratio) {
+                console.log(2)
+                factor = screen_width / video_width;
+                console.log(factor,777777777)
+                var  new_height = video_height * factor;
+                var  border_heigth = (screen_height - new_height) / 2;
+                if (y > border_heigth && this.y < screen_height - border_heigth) {
+                    new_x = parseFloat(x / factor);
+                    new_y = parseFloat((y - border_heigth) / factor);
+                    msg.pointx=new_x;
+                    msg.pointy=new_y;
+                }else {
+                    alert('无效位置')
+                }
+            }else {
+                console.log(3)
+                factor = screen_height / video_height;
+                var new_width = video_width * factor;
+                var  border_width = (screen_width - new_width) / 2;
+                if (y > border_width && y < screen_width - border_width) {
+                    new_y = parseInt(y / factor);
+                    new_x = parseInt((x - border_width) / factor);
+                    msg.pointx=new_x;
+                    msg.pointy=new_y;
+                }else {
+                    alert('无效位置')
+                }
+            }
+        }
+    }
+    var handleRemoteStreamRemoved=function(event){
+        console.log("Remote stream removed. Event: ", event);
+    }
+    var  requestFullScreen=function(element) {
+
+        if (element.webkitEnterFullScreen) {
+            // Toggle fullscreen in Safari for iPad
+            element.webkitEnterFullScreen();
+        } else {
+            // Toggle fullscreen for other OS / Devices / Browsers
+        }
+    }
+    var full=function () {
+        requestFullScreen(video1)
+    }
+</script>
+</body>
+</html>
